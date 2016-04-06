@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= title %></title>
+    <link rel='stylesheet' href='/stylesheets/style.css' />
+  </head>
+  <body>
+    <script type="text/javascript">
+	  function inputCheck() {
+	    var dbVal = document.getElementById('dbName').value;
+		var dirVal = document.getElementById('dirName').value;
+
+		if ( (dbVal != 'default') && (dirVal != 'default')) {
+		  document.getElementById('run').disabled = false; 
+		} else {
+		  document.getElementById('run').disabled = true; 
+		}
+	  }
+
+	  function showWaitMsg() {
+	    
+		document.getElementById('wait').innerHTML='입력중입니다. 기다려주세요..';
+		iframe = document.getElementById('couchFrame');
+		setInterval(function(){ iframe.src += ''; },3000);
+	  }
+
+	</script>
+    <div id="header">
+	  <h2><%= title %></h2>
+	</div>
+
+	<div id="section">
+
+		<p>1. 입력될 DB 선택</p>
+	  <form name="myform" action="dbInsert" method="post">
+		  <select id="dbName" name="dbName" onchange="inputCheck();">
+			<option value="default">선택하세요</option>
+	  <%for (var i = 0, len = dbList.length ; i < len ; i++ ){%>
+			<option value="<%=dbList[i]%>"><%=dbList[i]%></option>
+	  <%}%>
+		  </select>
+
+		<br/> <br/>
+
+		<p>2. 입력할 자료 선택 </p>
+		  <select id="dirName" name="dirName" onchange="inputCheck();">
+			<option value="default">선택하세요</option>
+	  <%for (var i = 0, len = dirList.length ; i < len ; i++ ){%>
+			<option value="<%=dirList[i]%>"><%=dirList[i]%></option>
+	  <%}%>
+		  </select>
+
+		<br/> <br/>
+
+		<p>3. 실행 </p>
+		<input id="run" type="submit" value="DB입력실행" disabled="disabled" onclick="showWaitMsg();"/>
+		<br/><span id="wait"></span>
+
+	  </form>
+
+	  <br/><br/>
+
+<!--
+	  <div id="output" hidden="<%= ((result.length==0) ? true : false)%>">
+	  -->
+	  <div id="output">
+	    <% if (result.length != 0) { 
+		     var successCnt = 0;
+			 var failCnt = 0;
+			 var failInfo = [];
+		     for(var i=0, len=result.length ; i < len ; i++ ) {
+			    var eachResult = result[i].split(',');
+				if (eachResult[0] == 'true') {
+				  successCnt++;
+				} else {
+				  failCnt++;
+				  failInfo.push(eachResult[3]+","+eachResult[1] + ': ' + eachResult[2]);
+				}
+		 	 } 
+
+			 if (successCnt !=0) { %>
+			   <p><%=successCnt%> 건이 성공적으로 입력되었습니다.</p>
+		<%	 } if (failCnt !=0) { %>
+		       <p style="color:red"><%=failCnt%> 건의 입력이 실패되었습니다.</p>
+			   <textarea style="color:red" rows="5" cols="200"><%for(var i=0, len=failInfo.length; i < len ; i++){%>
+<%=failInfo[i]%><%}}%>
+			   </textarea>
+		<% } %>
+	  </div>
+	</div>
+
+	<iframe id='couchFrame' src="http://localhost:5984/_utils/index.html"></iframe>
+
+
+  </body>
+</html>

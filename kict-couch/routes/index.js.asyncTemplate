@@ -1,0 +1,90 @@
+
+/**************************************
+ * global variables
+ **************************************/
+var fs = require('fs');
+var dir = require('node-dir');
+var async = require('async');
+var resourceDir = './resource/';
+module.nano = null;
+module.db = null;
+
+/**************************************
+ * binding couchdb driver
+ **************************************/
+exports.init = function(couchdb, res) {
+  module.nano = couchdb;
+};
+
+/**************************************
+ * init page render
+ * desc : get db list
+          and then render page
+**************************************/
+exports.index = function(req, res) {
+  getDBList(function(data) {
+    var resourceDir = fs.readdirSync('./resource');
+	res.render('index', {
+	  title: 'KICT - Data insert to CouchDB',
+	  dbList: data,
+	  dirList: resourceDir,
+	  result: []
+	});
+  });
+};
+
+/**************************************
+ * function : getDBList
+ * desc : get db list
+**************************************/
+function getDBList(callback) {
+  module.nano.db.list(function(err, body) {
+    var userDB = [];
+	for (var i = 0, len = body.length ; i < len ; i++ ){
+	   if (body[i] == '_replicator')
+	 	 continue;
+	   if (body[i] == '_users')
+		 continue;
+	   if (body[i] == 'history')
+		 continue;
+	   userDB.push(body[i]);
+	 }
+    callback(userDB);
+ });
+};
+
+/***************************************************
+ * post action : dbInsert & render
+ * desc : 
+***************************************************/
+exports.dbInsert = function(req, res) {
+
+  require('date-format-lite');
+  module.db = module.nano.use(req.body.dbName);
+  var dirName = resourceDir + req.body.dirName;
+
+  async.waterfall([
+    /**********************************
+	 * No.1 waterfall function
+	 *   desc : 
+     **********************************/
+    function (callback) {
+	  callback(null, dirList);
+	},
+
+    /**********************************
+	 * No.2 waterfall function
+	 *   desc : 
+     **********************************/
+	function (dirList, callback) {
+	  callback(null, fileList);
+	},
+  ],
+
+  /***********************************************
+   * final or error processing waterfall function
+   *   desc : 
+   ***********************************************/
+  function (err, fileList) {
+  });
+};

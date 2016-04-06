@@ -1,0 +1,145 @@
+
+var fs = require('fs');
+require('date-format-lite');
+module.nano = null;
+module.db = null;
+
+exports.index = function(req, res){
+	getDBList(function(data) {
+	  var userDB = data;
+	  var resourceDir = fs.readdirSync('./resource');
+	  var msg = [];
+
+	  res.render('index', { 
+		  title: 'KICT - Data insert to CouchDB',
+		  dbList: userDB,
+		  dirList: resourceDir,
+		  result: msg
+	  });
+
+	});
+};
+
+function getDBList(callback) {
+  module.nano.db.list(function(err, body) {
+    var userDB = [];
+	for (var i = 0, len = body.length ; i < len ; i++ ){
+	  if (body[i] == '_replicator')
+	    continue;
+	  if (body[i] == '_users')
+	    continue;
+	  if (body[i] == 'history')
+	    continue;
+	  userDB.push(body[i]);
+	}
+	callback(userDB);
+  });
+}
+
+exports.init = function(couchdb, res) {
+  module.nano = couchdb;
+};
+
+exports.dbInsert = function(req, res) {
+
+  connectDB(req.body.dbName);
+
+  var dirName = req.body.dirName;
+  
+  var metaDir = './resource/'+dirName+'/META/';
+  var camDir  = './resource/'+dirName+'/RGB/';
+  var LumiDir = './resource/'+dirName+'/YUV/';
+  var TrackDir= './resource/'+dirName+'/TRACKING/';
+
+  var date = new Date();
+  var historyKey = date.format("YYYYMMDD_hhmmssms");
+  var historyVal = {"dbName":req.body.dbName,"resouce":dirName};
+
+  function run(callback) {
+	fs.readdir(metaDir, function(err, files) {
+	  if (err) {
+		console.log(err);
+	  }
+
+	  var msg = [];
+	  for (var i = 0 , len = files.length ; i < len ; i++) {
+		function repeatRun(result) {
+		  fs.readFile(metaDir+files[i], function(err, data) {
+			if (err) {
+			  console.log(err);
+			}
+
+			var jsObj = JSON.parse(data);
+			var key = jsObj.Camera.SysTime;
+			var temp = (jsObj.Camera.File).split("/");
+			var camImg = temp[temp.length-1];
+			var camImgData = getImgData(camDir+camImg);
+			temp = (jsObj.Luminance.YUV).split("/");
+			var LumiImg = temp[temp.length-1];
+			var LumiImgData = getImgData(LumiDir+LumiImg);
+			temp = (jsObj.Tracking.File).split("/");
+			var TrackImg = temp[temp.length-1];
+			var TrackImgData = getImgData(TrackDir+TrackImg);
+
+			var attachImg = [
+			 { name: camImg,   data: camImgData,  content_type: 'image/jpg' },
+			 { name: LumiImg,  data: LumiImgData, content_type: 'image/jpg' },
+			 { name: TrackImg, data: TrackImgData,content_type: 'image/jpg' } 
+			];
+			module.db.multipart.insert(jsObj, attachImg, key, function(err, body) {
+			  if (err) {
+				result(err.name+','+key+','+err.reason);
+			  } else {
+				result(body.ok+','+body.id);
+			  }
+			});
+
+		  });
+		}
+
+		repeatRun(function(data) {
+		  msg.push(data);
+		  if (msg.length == len) {
+		    callback(msg);
+		  }
+		});
+	  }
+	});
+  }
+
+  function setHistory(doAfter) {
+    var history = module.nano.use('history');
+	history.insert(historyVal, historyKey, function(err, body, header) {
+	  if (err) {
+		console.err(key + ' insert err');
+		return;
+	  }
+	  doAfter();
+	});
+  }
+
+  run(function(resultMsg) {
+
+	getDBList(function(data) {
+	  var resourceDir = fs.readdirSync('./resource');
+
+	  setHistory(function() {
+		res.render('index', {
+		  title: 'KICT - Data insert to CouchDB',
+		  dbList: data,
+		  dirList: resourceDir,
+		  result: resultMsg
+		});
+	  });
+	});
+  });
+}
+
+function getImgData(path) {
+  return fs.readFileSync(path);
+};
+
+function connectDB(dbName) {
+  module.db = module.nano.use(dbName);
+}
+

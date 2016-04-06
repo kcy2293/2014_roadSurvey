@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+  <head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>KICT-건설기술연구원 야간도로조사자료관리 프로그램</title>
+	<link rel="stylesheet" type="text/css" href="css/jquery-ui-1.10.3.css" />
+	<link rel="stylesheet" type="text/css" href="css/leaflet.css" />
+	<link rel="stylesheet" type="text/css" href="css/style.css" />
+	<link rel="stylesheet" type="text/css" href="css/style.jstree.min.css" />
+
+	<script type="text/javascript" src="js/kictWindow.js"></script>
+	<script type="text/javascript" src="js/jquery-latest.js"></script>
+	<script type="text/javascript" src="js/jquery-ui-latest.js"></script>
+	<script type="text/javascript" src="js/jquery.layout-latest.js"></script>
+	<script type="text/javascript" src="js/jquery.paginate.js"></script>
+	<script type="text/javascript" src="js/jstree.js"></script>
+	<script type="text/javascript" src="js/kictDialog.js"></script>
+	<script type="text/javascript" src="js/leaflet/leaflet-src.js"></script>
+	<script type="text/javascript" src="js/leaflet/proj4-compressed.js"></script>
+	<script type="text/javascript" src="js/leaflet/proj4leaflet.js"></script>
+	<script type="text/javascript" src="js/leaflet/leaflet-providers.js"></script>
+	<script type="text/javascript" src="js/leaflet/Leaflet.KoreanTmsProviders.js"></script>
+	<script type="text/javascript" src="js/leaflet/Leaflet.MultiOptionsPolyline.js"></script>
+	<script type="text/javascript" src="js/leaflet/leaflet.polylineDecorator.js"></script>
+	<script type="text/javascript" src="js/leaflet/leaflet-editable-polyline.js"></script>
+	<script type="text/javascript" src="js/pouchdb-3.1.0.min.js"></script>
+	<script type="text/javascript" src="js/vworldUtils.js"></script>
+
+	<script type="text/javascript">
+	$(document).ready(function() {
+	  // set layout
+	  $('body').layout({  
+		west__applyDefaultStyles: true
+        ,center__applyDefaultStyles: true 
+        , west__size:     "360"
+	  });
+  
+	  $('#inner').layout({
+		applyDefaultStyles: true
+		,south__size: "350"
+	  }); 
+	  $('.ui-layout-west').css("overflow-x","hidden");
+
+	  setTimeout(function() {
+		initMap();
+	  }, 100);
+
+	  // set db, import dir list
+	  appendDirList();
+	  appendDbList();
+
+	});
+
+	process.on("uncaughtException", function(e) {
+	  console.log(e);
+	});
+	</script>
+
+  </head>
+  <body>
+	<div class="ui-layout-north" id="north">
+	  <div class="top_block block_1">
+		<div class="content" >
+		  <div class="logo">
+			<a href="http://www.kict.re.kr/">
+			  <img src="images/logo.gif" width="221" height="57" alt="KICT 한국건설기술연구원">
+			</a>
+		  </div>
+		  <div  class="version">
+			<h1>야간도로 시인성 평가자료 관리시스템       V1.0</h1>
+		  </div>
+		</div>
+	  </div>
+	</div>
+		
+	<div class="ui-layout-center" id="inner">
+	  <div class="ui-layout-center">
+		<div id="mapdisplay">
+		  <div id="map1" ></div>
+		</div>
+	  </div>
+	  <div class="ui-layout-south">
+		<div>
+		  <button id="jsonDownload" style="position:absolute;margin-left:170px;height:20px">
+		</div>
+		<div id = "jsonInfo">
+		</div>
+		<div id="imagesView">
+		  <div style="float:right;margin-top:5px;margin-right:15px;">
+			<button id="imgDownload" style="height:25px">
+		  </div>
+		  <ul>
+			<li><a href="#tabs-1">RGB</a></li>
+			<li><a href="#tabs-2">YUV</a></li>
+			<li><a href="#tabs-3">Tracking</a></li>
+		  </ul>
+		  <div id="tabs-1"><img id="RGBImg" src="" style="cursor:pointer"/></div>
+		  <div id="tabs-2"><img id="YUVImg" src="" style="cursor:pointer"/></div>
+		  <div id="tabs-3"><img id="TRACKINGImg" src="" style="cursor:pointer"/></div>
+		</div>			  
+
+	  </div>
+	</div>
+
+	<div class="ui-layout-west">
+	  <div>
+		<h3>데이터베이스</h3>
+	  </div>	
+	  <div style="border-bottom:  solid 1px #000000;margin-bottom:10px;"></div>			
+	  <div style="margin-left:15px;margin-bottom:35px;">
+		<select class="dblists" id="dblistSelect" style="width:270px;height:23px;"> </select>
+		<!--
+		<img id="mngMenu" src="images/preferences.png" width="20" height="20" style="cursor:pointer; position:relative; left: 11px; top: 6px"></img>
+		-->
+		<button id="mngMenu">관리</button>
+	  </div>
+	  <ul>
+		<li>DB생성</li>
+		<li>DB삭제</li>
+		<li>자료등록</li>
+	  </ul>
+	  <div>
+		<h3>검색 조건</h3>
+	  </div>	
+	  <div style="border-bottom:  solid 1px #000000;margin-bottom:10px;"></div>
+
+	  <div style="margin-bottom:10px; font-size:15px">
+		<input type="checkbox" value="" style="width:10px;">
+		기간&nbsp;&nbsp;
+		<input type="text" id="from" style="width:118px;">
+		  ~
+		<input type="text" id="to" style="width:118px;"> 
+	  </div>		
+		  
+	  <div style="margin-bottom:10px;font-size:15px">
+		<input type="checkbox" value="" style="width:10px;">
+		작업&nbsp;&nbsp;
+		<select id="deviceList" style="width:260px;"> 
+		  <option value="clear" checked>기기명</option>
+		</select>
+	  </div>	
+
+	  <div style="margin-bottom:35px;margin-right:15px;text-align:right;">
+		<input id="search-db" type="button" value="검색" style="width:100px;">
+	  </div>											
+
+	  <div style="float:left;margin-right:15px;">
+		<h3>결과</h3>
+	  </div>		
+	  <!--기능-->
+	  <section class="kict_function_area">
+		<div style="margin-top:-5px;margin-right:15px;float:left">
+		  <select class="listCount" id="listSize" style="width:70px;" >
+			<option value="10">10개씩</option><option value="15">15개씩</option>
+			<option value="20">20개씩</option><option value="30">30개씩</option>
+			<option value="40">40개씩</option><option value="50">50개씩</option>
+		  </select>
+		</div>
+	  </section>
+	  <button id="btnAnimate" style="margin-top:-4px;margin-right:5px;float:left" >play</button>
+	  <button id="stopAnimate" style="margin-top:-5px" >stop</button>
+
+	  <div style="border-bottom:  solid 1px #000000;margin-bottom:10px;">
+	  </div>			
+
+	  <div id="metafilelist">
+		<table id="docsTable" style="margin-left:15px" cellpadding="0" cellspacing="0" border="0"> 
+		  <thead> 
+			<tr><th style="width:50px;">No</th><th style="width:60px;">관측일</th>
+				<th style="width:60px;">관측시</th><th style="width:100px;">위도</th>
+				<th style="width:100px;">경도</th><th  style="width:50px;">밝기</th></tr>
+		  </thead>
+		  <tbody></tbody>
+		</table>
+		<div id="paging"></div>
+
+		<div class="kict_function_area">
+		</div>
+
+		<div style="margin-bottom:35px;margin-right:-10px;text-align:right;">
+		  <input id="btnExport" type="button" value="내보내기" style="width:100px;" />
+		</div>
+
+		<div id="csv" style="display:none"/>
+		</div>											
+		<a id="download_link" download="">
+		  <input id="export_file" type="button" style="display:none" />
+		</a>
+
+		<!-- dailog div start--> 
+		<div id="createdb-form" title="DB 생성">
+		  <p class="validateTips">
+		  새롭게 생성할 DB 이름을 입력하세요</p>
+		  <form id="createForm">
+			<fieldset>
+			  <input type="text" name="inputbox" id="inputbox" class="text ui-widget-content ui-corner-all" />
+			  <input type="submit" tabindex="-1" style="position:absolute; top:-1000px"/>
+			</fieldset>
+		  </form>
+		</div>
+
+		<div id="removedb-form" title="DB 삭제">
+		  <p>
+			<span class="ui-icon ui-icon-alert" style="float:left; margin:0 7px 20px 0;"></span>
+		  </p>
+		</div>
+
+		<div id="importdb-form" title="자료추가">
+		  <div style="margin-top:15px">
+			<p style="width:100px;float:left;line-height:1px">데이터베이스 </p>
+			<select id="dblistform" name="dblistform"></select>
+			<span id="toolbar">
+			  <button class="add"></button>
+			  <button class="delete"></button>
+			</span>
+		  </div>
+		  <br/>
+		  <div style="margin-top:15px">
+			<p style="width:100px;float:left;line-height:1px">자료명 </p>
+			<select id="dirlistform" name="dirlistform"></select>
+		  </div>
+		  <div style="margin-top:15px">
+			<div id="progressbar">
+			  <div id="plabel" class="progress-label"></div>
+			</div>
+		  </div>
+		  <div style="margin-top:15px">
+		    <textarea id="importMsg" style="width:100%; height:130px;" readonly>
+			</textarea>
+		  </div>
+		</div>
+
+		<div id="result-msg" title="DB명령 실패">
+		  <p></p>
+		</div>
+		<div id="msgDialog" title="결과 메세지">
+		  <p><span class="ui-icon ui-icon-circle-check" style="float:left; margin:0 7px 50px 0;"></span></p>
+		</div>
+	  </div>
+	</div>
+  </body>
+</html>

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+  <head> 
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8"> 
+	<title>KICT-건설기술연구원 야간도로조사자료관리 프로그램</title> 
+	<link rel="stylesheet" type="text/css" href="/css/jquery-ui-1.10.3.css" />
+	<link rel="stylesheet" type="text/css" href="/css/style.scad.css">
+  </head>
+  <body>
+	<table style="position: absolute; z-index:1; left: 10px; top 10px;" id="toolbox">
+	  <tr><th colspan="4" class="toolboxtitle">Toolbox
+	  <tr><td id="editToolSource"><td id="addToolSource"><td id="remToolSource"><td id="imgToolSource">
+	  <tr id="editToolOptions"><td id="editToolCorner"><td id="editToolSmooth"><td><td>
+	  <tr><td colspan="4" id="imageToolOptions" style="display: none;">
+	  Url: <input type="text" id="traceImageURL" style="width: 100px" disabled><br \>
+	  Scale: <input type="text" id="traceImageScale" style="width: 40px" value="100" disabled>%
+	  <tr><th colspan="4" class="toolboxtitle">Paths
+	  <tr><td colspan="4"><select size="10" id="pathListbox" style="width: 140px"><option>[New]</select>
+	  <tr><th colspan="4" class="toolboxtitle">OpenSCAD code
+	  <tr><td colspan="4"><textarea id="exportArea" style="width:130px; height: 200px;"></textarea>
+	  <tr><td colspan="4">
+		<div style="text-align:center;">
+		  <input id="save" type="button" value="SAVE"/>
+		</div>
+	</table>
+
+	<div id="wrapper">
+	  <img id="traceImage" style="position: absolute; left: 0px;">
+	  <div id="drawAreaSource"></div>
+	  <div id="cursorCoordinates" style="float: left"></div>
+	</div>
+
+	<div id="save-confirm" title="아래 이미지의 평균밝기값을 저장하시겠습니까?">
+	  <canvas id="clipCanvas" style="display: none;">
+	  </canvas>
+	</div>
+
+	<div id="saveInfo" title="선택영역 이미지 저장">
+	  <div id="confirmMsg" style="font-size:17px;margin-left:10px">
+	  </div>
+	</div>
+
+	<!-- test #1
+	  <br/>
+	  <canvas id="testCanvas">
+	  </canvas>
+	-->
+
+	<script type="text/javascript" src="/js/jquery.min-1.10.2.js"></script>
+	<script type="text/javascript" src="/js/jquery-ui-latest.js"></script>
+	<script type="text/javascript" src="/js/raphael-min.js"></script>
+	<script type="text/javascript" src="/js/osped.js"></script>
+	<script type="text/javascript">
+	  var imgpath = "<%-imgPath%>";
+	  var updateUrl = "<%-updateUrl%>";
+
+	  var context;
+	  var clipContext;
+
+	  $("#traceImageURL").val(imgpath);
+	  $("#traceImageURL").keyup();
+	  getImgContext(imgpath);
+
+	  var meanY;
+	  var minLum;
+	  var maxLum;
+
+	  var saveDialog = $("#saveInfo").dialog( {
+		autoOpen: false,
+		height: 310,
+		width: 350,
+		modal: true,
+		open: function() {
+				$("#editToolSource").trigger('click');
+			  },
+		close: function() {
+				$("#addToolSource").trigger('click');
+			  },
+		buttons: {
+		  "저장": function() {
+					updateDoc(meanY, minLum, maxLum, function(succeed) {
+					  if (succeed === true) {
+						  console.log('if you want to reload parenWindow. code here..!!');
+					  }
+
+					  var wannaClose = window.confirm("현재 창을 닫으시겠습니까?");
+					  if (wannaClose === true) {
+						window.close();
+					  } 
+					});
+				  },
+		  "취소": function() {
+					saveDialog.dialog("close");
+				  }
+		}
+	  });
+
+	  $("#save").click(function() {
+		var polygonStr = $("#exportArea").val();
+		if (polygonStr !== '') {
+		  var polygon = extractArea(polygonStr);
+		  var polyLen = polygon.length;
+
+		  if (polyLen > 3) {
+			var minPoint = polygon[0].slice();
+			var maxPoint = polygon[0].slice();
+
+			for(var i = 1 ; i < polyLen ; i++) {
+			  var currX = polygon[i][0];
+			  var currY = polygon[i][1];
+
+			  // compare x
+			  if ( currX < minPoint[0] ) {
+				minPoint[0] = currX;
+			  } else if ( currX > maxPoint[0] ) {
+				maxPoint[0] = currX;
+			  }
+
+			  // compare y
+			  if ( currY < minPoint[1] ) {
+				minPoint[1] = currY;
+			  } else if ( currY > maxPoint[1] ) {
+				maxPoint[1] = currY;
+			  }
+
+			}
+
+			clippingPath(polygon, minPoint, maxPoint);
+
+			/* for test #1
+			for(var i = 0 ; i < polyLen ; i++) {
+			  var currX = polygon[i][0];
+			  var currY = polygon[i][1];
+			  var nextX;
+			  var nextY;
+			  if (i !== (polyLen - 1)) {
+				nextX = polygon[i+1][0];
+				nextY = polygon[i+1][1];
+			  } else {
+				nextX = polygon[0][0];
+				nextY = polygon[0][1];
+			  }
+
+			  context.moveTo(currX, currY);
+			  context.lineTo(nextX, nextY);
+			  context.lineWidth=1;
+			  context.strokeStyle="red";
+			  context.stroke();
+			}
+			*/
+
+			return true;
+		  }
+		}
+
+		alert('ROI 영역을 지정하세요');
+		return false;
+	  });
+
+	  /****************************************************************
+	   * function : 넘겨받은 polygon data를 바탕으로 clip image를 구성하고
+	   *            최소,최대 x,y 값을 바탕으로 픽셀데이터를 추출, 계산한다.
+	   ***************************************************************/
+	  function clippingPath(polygon, minPoint, maxPoint) {
+		var clipImg = $("#traceImage")[0];
+		clipContext.save();
+		clipContext.beginPath();
+		clipContext.moveTo(polygon[0][0], polygon[0][1]);
+		for(var i = 1, polyLen = polygon.length; i < polyLen ; i++) {
+		  clipContext.lineTo(polygon[i][0], polygon[i][1]);
+		}
+		clipContext.closePath();
+		clipContext.lineWidth=2;
+		clipContext.stroke();
+		clipContext.clip();
+		clipContext.drawImage(clipImg, 0, 0);
+		clipContext.restore();
+
+		var maxX = maxPoint[0];
+		var maxY = maxPoint[1];
+
+		var count = 0;
+		var totalY = 0.0;
+		minLum = 256.0;
+		maxLum = 0.0;
+
+		//console.time('function #getImageData');
+		var xGap = maxX - minPoint[0];
+		var yGap = maxY - minPoint[1];
+
+		var clipImgData = clipContext.getImageData(minPoint[0], minPoint[1], xGap, yGap);
+		var pixels = clipImgData.data;
+
+		for (var i = 0, len = xGap*yGap ; i < len ; i++) {
+		  var R = parseInt(pixels[i*4]);
+		  var G = parseInt(pixels[i*4+1]);
+		  var B = parseInt(pixels[i*4+2]);
+		  if (R !== 0 && G !== 0 && B !== 0) {
+			var y = R *  0.299000 + G *  0.587000 + B *  0.114000;
+			totalY += y;
+			if (y < minLum) {
+			  minLum = y;
+			}
+			if (y > maxLum) {
+			  maxLum = y;
+			}
+
+			count++;
+		  }
+		}
+		//console.timeEnd('function #getImageData');
+		meanY = totalY / count;
+
+		$("#confirmMsg").html(
+		  "<p>총 픽셀 수 : "+ count +"</p>"
+		  + "<p>평균 밝기 Y값 : " + meanY + "</p>"
+		  + "<p>최대 밝기 Y값 : " + maxLum + "</p>"
+		  + "<p>최소 밝기 Y값 : " + minLum + "</p>"
+		  + "<br/><p>밝기값 정보를 업데이트 하시겠습니까?</p>"
+		);
+
+		saveDialog.dialog("open","parameter");
+	  }
+
+	  /****************************************************************
+	   * function : update data to db
+	   ***************************************************************/
+	  function updateDoc(meanY, minLum, maxLum, todo) {
+		if (updateUrl != null) {
+		  var updateData;
+		  $.ajax({
+			url: updateUrl
+			, dataType: 'JSON'
+			, jsonpCallback: 'callback'
+			, type: 'GET'
+			, success: 
+			  function(data) {
+				if (typeof data === 'string') {
+				  updateData = $.parseJSON(data);
+				} else {
+				  updateData = data;
+				}
+				updateData.Luminance.MeanY = meanY.toString();
+				updateData.Luminance.MinY = minLum.toString();
+				updateData.Luminance.MaxY = maxLum.toString();
+
+				if (updateData != null) {
+				  $.ajax({
+					url: updateUrl
+					, type: "PUT"
+					, contentType: "application/json; charset=utf-8"
+					, dataType: "json"
+					, data: JSON.stringify(updateData)
+					, success: 
+					  function(result) {
+						if (result.ok === true) {
+						  alert('DB에 업데이트가 완료되었습니다');
+						  todo(true);
+						} else {
+						  console.error(result);
+						  alert('데이터 업데이터에 실패하였습니다. 다시 시도해주세요.');
+						  todo(false);
+						}
+					  }
+					, error: 
+					  function(err) {
+						console.error(err);
+						todo(false);
+					  }
+				  });
+				}
+
+			  }
+			, error:
+			  function(err) {
+			    console.error(err);
+				todo(false);
+			  }
+		  });
+
+
+		} else {
+		  todo(false);
+		}
+	  }
+
+	  /****************************************************************
+	   * function : polygonString을 받아서 이미지와 매칭되는 좌표들로 변환한다.
+	   ***************************************************************/
+	  function extractArea(polygonStr) {
+		var image = $("#traceImage");
+		var grid = $("#drawAreaSource");
+
+		var imagePosLeft = image.offset().left;
+		var imagePosTop = image.offset().top;
+		var centerX = grid.width();
+		centerX -= centerX % 128;
+		centerX /= 2;
+		centerX += grid.offset().left;
+		var centerY  = $(window).height() - grid.offset().top * 3;
+		centerY -= centerY % 128;
+		centerY /= 2;
+		centerY += grid.offset().top;
+
+		function polygon(param) {
+		  var imgLocArr = [];
+		  for(var i = 0, len = param.length ; i < len ; i++) {
+			var x = param[i][0];
+			var y = param[i][1];
+
+			var imgLocX = toX(x) - imagePosLeft;
+			var imgLocY = toY(y) - imagePosTop;
+			var imgLoc = [imgLocX, imgLocY];
+			imgLocArr.push(imgLoc);
+		  }
+		  return imgLocArr;
+		}
+
+		function toX(x) { return x * 8 + centerX; }
+		function toY(y) { return -y * 8 + centerY; }
+
+		return eval(polygonStr);
+	  }
+
+	  /*********************************************************
+	   * function : 넘겨받은 이미지를 canvas 를 생성하여 연결함
+	   *********************************************************/
+	  function getImgContext(image) {
+		// test #1 : change canvas, and uncomment with #1 in this document
+		// var canvas = document.getElementById("testCanvas");
+		var canvas = document.createElement("canvas");
+
+		var clipCanvas = document.getElementById("clipCanvas");
+
+		context = canvas.getContext('2d');
+		clipContext = clipCanvas.getContext('2d');
+
+		var img = new Image;
+		img.crossOrigin = 'anonymous';
+		img.onload = function() {
+		  canvas.width = img.width;
+		  canvas.height = img.height;
+		  clipCanvas.width = img.width;
+		  clipCanvas.height = img.height;
+		  context.drawImage(img, 0, 0);
+		}
+
+		img.src = image;
+	  }
+	</script>
+
+  </body>
+</html>

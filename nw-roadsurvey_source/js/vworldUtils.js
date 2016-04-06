@@ -1,0 +1,914 @@
+var db = null;
+var dbname = null;
+var docslist = null;
+var currentDocId = null;
+var currentDoc;
+var docsTotal = 0;
+var pagingCount = 10;
+var currentPage = 1;
+var map;
+var polyline;
+var multiopt;
+
+var path = require('path');
+var moment = require('moment');
+require('twix');
+var fs = require('fs');
+var resourcePath = path.join(path.dirname( process.execPath ), 'resource' );
+
+/****************************************************
+ * function : 맵초기화
+ ***************************************************/
+function initMap() {
+
+  L.Browser.webkit3d = false;
+  map = L.map('map1', {
+	  crs: L.Proj.CRS.TMS.Daum,
+	  continuousWorld: true,
+	  worldCopyJump: false,
+	  zoomControl: true
+  });
+  L.Proj.TileLayer.TMS.provider('DaumMap.Street').addTo(map);
+  //L.control.scale().addTo(map);
+  map.setView([38,127],0);
+
+  if (map.getSize().y < 10) {
+	  map.remove();
+	  setTimeout(function() {
+		  initMap();
+	  }, 100);
+  }
+}
+
+/****************************************************
+ * function : 리소스폴더 리스트 추가
+ ***************************************************/
+function appendDirList() {
+
+  var dirForm = $("#dirlistform");
+  var resourceDir = fs.readdirSync(resourcePath);
+  for (var i = 0, len = resourceDir.length ; i < len ; i ++){
+	dirForm.append('<option value='+resourceDir[i]+'>'+ resourceDir[i] +'</option>');
+  }
+}
+
+/****************************************************************************************
+ * function : DB명 리스트 추가
+ * appendDbList()
+ *  └─ fetchAllDocs() ─┬─ fillTable(..) ─┬─ setMap(..)
+ *                     │                 └─ ViewinDetail(..) ─┬─ jstree
+ *                     ├─ getUniqSelector()                   └─ setImg ── click-new_win
+ *                     ├─ setPaging(..)                       
+ *                     ├─ ("#imagesView").tabs()
+ *                     └─ setLegend()
+ ****************************************************************************************/
+function appendDbList() {
+
+  window.indexedDB.webkitGetDatabaseNames().onsuccess = function(sender, args) {
+	var dblist = [];
+	var result = sender.target.result;
+
+	var mainList = $("#dblistSelect");
+	var dialogList = $("#dblistform");
+
+	mainList.html("");
+	dialogList.html("");
+
+	for (var i = 0, len = result.length ; i < len ; i++) {
+	  dblist.push(result[i].replace('_pouch_',''));
+	  mainList.append('<option value='+dblist[i]+'>'+ dblist[i] +'</option>');
+	  dialogList.append('<option value='+dblist[i]+'>'+ dblist[i] +'</option>');
+	}
+
+	$( "#imagesView" ).tabs();
+	dbname = dblist[0];
+	new PouchDB(dbname, function(err, result) {
+	  if (err) {
+	  } else {
+		db = result;
+		if (db !== null) {
+		  fetchAllDocs();
+		}
+	  }
+	});
+  };
+}
+
+/*************************************************************
+ * function : 모든 documet fetch -> fillTable(), setPaging()
+ ************************************************************/
+function fetchAllDocs() {
+
+  db.allDocs({include_docs: true},function(err, result) {
+	if(err) {
+	  console.error("fetchAllDocs ERR : DB로부터 document 리스트추출에 실패하였습니다.");
+	  alert("ERR : DB로부터 document 리스트추출에 실패하였습니다.");
+	}
+	else {
+	  docslist = result.rows;
+	  docsTotal = result.total_rows;
+
+	  $( "#imagesView" ).tabs();
+	  $('#docsTable > tbody > tr').remove();
+
+	  if (docsTotal != 0) {
+		fillTable(0);
+		setPaging();
+		getUniqSelector();
+		$("#"+docslist[0].id).css("background","lightBlue");
+		setLegend();
+	  } else {
+		if (map != null) {
+		  map.setView([38,127],0);
+		  if (polyline != null) {
+			polyline.clearAddon();
+			map.removeLayer(polyline);
+		  }
+		  $( "#jsonInfo" ).jstree('destroy');
+		  $("#paging").remove();
+		  $("#RGBImg").attr("src","");
+		  $("#YUVImg").attr("src","");
+		  $("#TRACKINGImg").attr("src","");
+		}
+	  }
+	}
+  });
+}
+
+/*************************************************************
+ * function : 리스트테이블 하단 페이징 처리
+ ************************************************************/
+function setPaging() {
+
+  $("#paging").paginate({
+	count       : Math.ceil(docsTotal/pagingCount),
+	start       : 1,
+	display     : 10, 
+	border      : false,
+	text_color              : '#888',
+	background_color        : '#EEE', 
+	text_hover_color        : 'black',
+	background_hover_color  : '#CFCFCF',
+	images      : false,
+	mouse       : 'press',
+	onChange    : function(page){
+					currentPage = page;
+					$('#docsTable > tbody > tr').remove();
+					var nextStart = (page-1)*pagingCount;
+					fillTable(nextStart);
+					$("#"+docslist[nextStart].id).css("background","lightBlue");
+				  }   
+  }); 
+}
+
+/****************************************************************
+ * function : 테이블에 document 추가 -> viewinDetail(), setMap()
+ ***************************************************************/
+function fillTable(start) {
+
+  var docsTable = $('#docsTable > tbody');
+  for(i=start, max=parseInt(start)+parseInt(pagingCount); i<max; i++) {
+	if (docslist[i] != null) {
+	  var id = docslist[i].id;
+	  var lon = docslist[i].doc.GPS.Longitude;
+	  var lat = docslist[i].doc.GPS.Latitude;
+	  var lum = docslist[i].doc.Luminance.MeanY;
+
+	  // parcing id to date and time
+	  datetime = id.split("_");
+	  date = datetime[0];
+	  time = datetime[1];
+
+	  // make time string format (hour:minute:second)
+	  hour = time.substr(0,2);
+	  minute = time.substr(2,2);
+	  second = time.substr(4,2);
+	  time = hour+":"+minute+":"+second;
+
+	  // lon, lat, lum round
+	  lon = Math.round(lon*1000000)/1000000;
+	  lat = Math.round(lat*1000000)/1000000;
+	  lum = Math.round(lum*100)/100;
+	  docsTable.append('<tr id="'+docslist[i].id+'"> '+ 
+						  '<td>'+ (i+1)+ '</td>' + 
+						  '<td>'+ date + '</td>' +
+						  '<td>'+ time + '</td>' +
+						  '<td>'+ lat  + '</td>' +
+						  '<td>'+ lon  + '</td>' +
+						  '<td>'+ lum  + '</td></tr>');
+	}
+  }
+
+  ViewinDetail(docslist[start].id);
+  setMap(start);
+}
+
+/****************************************************************
+ * function : JSTREE 및 Image 추가
+ ***************************************************************/
+function ViewinDetail(docId) {
+
+  currentDocId = docId;
+  $( "#jsonInfo" ).jstree('destroy');
+  setImage(docId, "TEGRA7_RGB_"+ docId +".jpg", $("#RGBImg"));
+  setImage(docId, "TEGRA7_YUV_"+ docId +".jpg", $("#YUVImg"));
+  setImage(docId, "TEGRA7_TRACKING_"+ docId +".jpg", $("#TRACKINGImg"));
+
+  db.get(docId, function(err, data) {
+	if (err) {
+	  console.error("ERR : document 추출실패 - " + err);
+	} else {
+	  var jstreeData = [];
+	  delete data._rev; delete data._attachments;
+	  if (data !== null) {
+	    currentDoc = data;
+		extract(data, null, 0);
+	  } else {
+	    console.err("ERR : meta data is null!!");
+		return false;
+	  }
+
+	  /***************************
+	   * function : JSTREE에 추가
+	   ***************************/
+	  function addTree(id, pid, text, opened) {
+		jstreeData.push({
+		  "id" : id,
+		  "parent" : pid,
+		  "text" : text,
+		  "state" : {
+			"opened": opened
+		  }
+		});
+	  }
+
+	  /*****************************************************
+	   * function : 재귀함수, metadata 추출 및 addTree call
+	   *****************************************************/
+	  function extract(metaJson, parentVal, index) {
+		if (metaJson.length === undefined) {
+		  var keys = Object.keys(metaJson);
+		  var idKey = 0;
+		  for (var i = 0, klen = keys.length ; i < klen ; i++) {
+			if (keys[i] === '_id') {
+			  idKey = i;
+			  break;
+			}
+		  }
+
+		  for (var i = 0, klen = keys.length ; i < klen ; i++) {
+			// root & each parent
+			if (parentVal === null) {
+			  if (keys[i] === '_id') {
+				var idText = metaJson[keys[i]].toString();
+				addTree(idText, '#', idText+'', true);
+			  } else {
+				// this is node
+				if (metaJson[keys[i]].length === undefined) {
+				  addTree( keys[i], metaJson[keys[idKey]], keys[i], false);
+				  extract( metaJson[keys[i]], keys[i], i);
+				}
+				// this is leaf
+				else {
+				  if (Array.isArray(metaJson[keys[i]])) {
+					addTree( keys[i], metaJson[keys[idKey]], keys[i], false);
+					var arr = metaJson[keys[i]];
+					for (var arrIdx = 0, arrLen = arr.length ; arrIdx < arrLen ; arrIdx++) {
+					  addTree( keys[i] + '' + arrIdx , keys[i], arrIdx + ' : ' + JSON.stringify(arr[arrIdx]), false);
+					}
+				  } else {
+					addTree( keys[i], metaJson[keys[idKey]], keys[i]+ ' : ' +metaJson[keys[i]], false);
+				  }
+				}
+			  }
+			}
+			// no root  
+			else {
+			  // this is node
+			  if (metaJson[keys[i]].length === undefined) {
+				addTree(index+'_'+keys[i], parentVal, keys[i], false);
+				extract(metaJson[keys[i]], index+'_'+keys[i], index);
+			  }
+			  // this is leaf
+			  else {
+				if (Array.isArray(metaJson[keys[i]])) {
+				  addTree(index+'_'+keys[i], parentVal, keys[i], false);
+				  var arr = metaJson[keys[i]];
+				  for (var arrIdx = 0, arrLen = arr.length ; arrIdx < arrLen ; arrIdx++) {
+					addTree( index+'_'+keys[i]+''+arrIdx , index+'_'+keys[i], arrIdx + ' : ' + JSON.stringify(arr[arrIdx]), false);
+				  }
+				} else {
+				  addTree(index+'_'+keys[i]+metaJson[keys[i]], parentVal, keys[i]+ ' : ' +metaJson[keys[i]]);
+				}
+			  }
+			}
+		  }
+		} else {
+		  addTree(index+'_'+metaJson, parentVal, metaJson, false);
+		}
+	  }
+
+	  // make a jstree
+	  $('#jsonInfo').jstree(
+		{ 'core' : { 'data' : jstreeData }}
+	  );
+	}
+  });
+}
+/****************************************************************
+ * function : Image 추가
+ ***************************************************************/
+function setImage(id, imgId, obj) {
+
+  db.getAttachment(id, imgId, function(err, res) {
+	if (err) {
+	  console.error('ERR : fail to load image - ' + err);
+	} else {
+	  var URL = window.URL || window.webkitURL;
+	  var imgURL = URL.createObjectURL(res);
+	  obj.attr("src", imgURL);
+	  obj.attr("name", imgId);
+
+	  obj.click(function(e) {
+		var imgSrc = $(this).attr("src");
+		var selectedDbName = $("#dblistSelect").val();
+
+		e.stopImmediatePropagation();
+		var new_win = gui.Window.open(
+		  "imageEditor.html",
+		  { width:200, height: 300, toolbar: false}
+		);
+
+		new_win.on("loaded", function() {
+		  new_win.window.setImgPath(imgSrc);
+		  new_win.window.setParentWin(win);
+		  new_win.window.setDbAndDoc(selectedDbName, currentDocId);
+		});
+	  });
+
+	  // revoke url on new_win's function
+	  // URL.revokeObjectURL(imgURL);
+	}
+  });
+}
+
+/****************************************************************
+ * function : 해당페이지의 데이터를 맵에 표현
+ ***************************************************************/
+function setMap(start) {
+
+  if (polyline != null) {
+	polyline.clearAddon();
+	map.removeLayer(polyline);
+  }
+
+  // Polyline-Editor
+  var positions = [];
+  for(var s = parseInt(start), limit=parseInt(start)+parseInt(pagingCount); s < limit; s++) {
+	if (docslist[s] != null) {
+	  if (docslist[s].doc.GPS.Latitude !== '0.0' || docslist[s].doc.GPS.Longitude !== '0.0') {
+		var latlon = L.latLng(docslist[s].doc.GPS.Latitude, docslist[s].doc.GPS.Longitude);
+		positions.push(latlon);
+	  }
+	}
+  }
+
+  var polylineOptions = {
+	stroke: false,
+	newPolylines: false,
+	maxMarkers: 1000
+  }
+
+  if(positions.length !== 0) {
+	polyline = L.Polyline.PolylineEditor(positions, polylineOptions).addTo(map)
+	map.fitBounds(polyline);
+  } else {
+	map.setView([38,127],0);
+  }
+}
+
+/****************************************************************
+ * function : 선택한 마커를 크게하고, 팝업을 띄운다.
+ ***************************************************************/
+function focusMarker(pos) {
+
+  if (polyline != null) {
+	var points = polyline.getPoints();
+	var marker = points[pos];
+
+    if (selectedMarkerPoint != null) {
+	  points[selectedMarkerPoint].setIcon(smallIcon);
+    }
+
+    var idx = pos + ((currentPage - 1)*pagingCount);
+    var lum = Math.round(docslist[idx].doc.Luminance.MeanY*100)/100;
+    var popup = L.popup().setContent('<p>No.'+ (idx+1) +'</p><p>밝기 '+lum+'</p>');
+
+	marker.bindPopup(popup).openPopup();
+
+    marker.setIcon(bigIcon);
+    selectedMarkerPoint = pos;
+  }
+}
+
+/****************************************************************
+ * function : 검색조건 제한을 위한 function
+ ***************************************************************/
+function getUniqSelector() {
+
+  $("#from").datepicker({
+	defaultDate: "+1w",
+	changeYear: true,
+	changeMonth: true,
+	numberOfMonths: 1,
+	onSelect: function( selectedDate ) {
+				$("#to").datepicker("option", "minDate", selectedDate);
+				$(this).parent().find('input:checkbox').attr('checked', true);
+			  }
+  });
+
+  $("#to").datepicker({
+	defaultDate: "+1w",
+	changeYear: true,
+	changeMonth: true,
+	numberOfMonths: 1,
+	buttonImage: "images/calendar.gif",
+	onSelect: function( selectedDate ) {
+				$("#from").datepicker("option", "maxDate", selectedDate);
+				$(this).parent().find('input:checkbox').attr('checked', true);
+			  }
+  });
+
+  uniqDays = [];
+  uniqDevice = [];
+
+  for (var i = 0, len = docsTotal ; i < len ; i++) { 
+	var surveyDay = (docslist[i].id.split("_"))[0];
+	var device = docslist[i].doc.device;
+
+	getUniq(uniqDays, surveyDay);
+	getUniq(uniqDevice, device);
+  }
+
+  /****************************************************************
+   * function : target array 에서 중복제거하여 arr에 담는다.
+   ***************************************************************/
+  function getUniq(arr, target) {
+	if (arr.length != 0) {
+	  var isin = false;
+	  for(var j = 0, alen = arr.length ; j < alen ; j++) {
+		if (arr[j] === target) {
+		  isin = true;
+		  return;
+		}
+	  }
+	  if (!isin) {
+		arr.push(target);
+	  }
+	} else {
+	  arr.push(target);
+	}
+  }
+
+  var daysLen = uniqDays.length;
+  if (daysLen === 0) {
+	$("#from").attr("disabled", true);
+	$("#to").attr("disabled", true);
+  } else if (daysLen === 1) {
+	$("#from").val(uniqDays[0]);
+	$("#to").val(uniqDays[0]);
+	$("#from").attr("disabled", true);
+	$("#to").attr("disabled", true);
+  } else {
+	$("#from").attr("disabled", false);
+	$("#to").attr("disabled", false);
+	$("#from").val("");
+	$("#to").val("");
+
+	uniqDays.sort();
+
+	$("#from").datepicker("option", "maxDate", uniqDays[daysLen-1]);
+	$("#from").datepicker("option", "minDate", uniqDays[0]);
+	$("#to").datepicker("option", "maxDate", uniqDays[daysLen-1]);
+	$("#to").datepicker("option", "minDate", uniqDays[0]);
+  }
+
+  uniqDevice.forEach(function(entry, index) {
+	$("#deviceList").append('<option value='+entry+'>'+entry+'</option>');
+  });
+}
+
+/****************************************************************
+ * function : 지도위에 범례표시
+ ***************************************************************/
+function setLegend() {
+  var legend = L.control( {position: 'bottomright'} );
+  legend.onAdd = function (map) {
+	var div = L.DomUtil.create('div', 'info legend');
+	div.innerHTML +=
+	  "<i style='background: #ff0000'></i> 불량 (Y < 25)<br>" 
+	+ "<i style='background: #0000ff'></i> 적정 (25 ≤ Y ≤ 40)<br>"  
+	+ "<i style='background: #00ff00'></i> 양호 (40 ≤ Y)<br>";
+
+	return div;
+  };
+  legend.addTo(map);
+}
+
+/****************************************************************
+ * function : 시작과 종료일 사이의 날짜리스트를 리턴
+ ***************************************************************/
+function getDateList(start, end) {
+
+  var itr = moment.twix(getDate(start), getDate(end)).iterate("days");
+  var range = [];
+  while(itr.hasNext()) {
+	var next = itr.next();
+	range.push(next.format("YYYYMMDD").toString());
+  }
+
+  return range;
+}
+
+/****************************************************************
+ * function : 저장된 날짜String 에서 Date 형식으로 변환
+ ***************************************************************/
+function getDate(input) {
+
+  return new Date(input.substr(0,4)+"/"+input.substr(4,2)+"/"+input.substr(6,2));
+}
+
+/***  event  **************************************************/
+
+$(function($) {
+  /***********************************************
+   * datepicker : 일자검색에 필요한 달력을 한글화
+   ***********************************************/
+  $.datepicker.regional["ko"] = {
+    closeText: '닫기',
+    prevText: '이전달',
+    nextText: '다음달',
+    currentText: '오늘',
+    monthNames: ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+    monthNamesShort: ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+    dayNames: ['일','월','화','수','목','금','토'],
+    dayNamesShort: ['일','월','화','수','목','금','토'],
+    dayNamesMin: ['일','월','화','수','목','금','토'],
+    weekHeader: 'Wk',
+    dateFormat: 'yymmdd', 
+    firstDay: 0,
+    isRTL: false,
+    showMonthAfterYear: true,
+    yearSuffix: '년'
+  };
+  $.datepicker.setDefaults($.datepicker.regional['ko']);
+
+  /***********************************************
+   * play & stop button icons
+   ***********************************************/
+  $("#btnAnimate")
+  	.button({
+	  text:false,
+	  icons: {
+		primary: "ui-icon-play"
+	  }
+	})
+	.css("width","20px")
+	.css("height","20px");
+
+  $("#stopAnimate")
+	.button({
+	  text:false,
+	  icons: {
+	    primary: "ui-icon-stop"
+	  }
+	})
+	.css("width", "20px")
+	.css("height", "20px");
+
+  /***********************************************
+   * download button icons
+   ***********************************************/
+  $("#imgDownload")
+    .button({
+	  text:false,
+	  icons: {
+	    primary: "ui-icon-arrowthickstop-1-s"
+	  }
+	});
+
+  $("#jsonDownload")
+    .button({
+	  text:false,
+	  icons: {
+	    primary: "ui-icon-arrowthickstop-1-s"
+	  }
+	});
+
+  /****************************
+   * event : DB명 변경 클릭시
+   ****************************/
+  $("#dblistSelect").change(function () {
+	dbname = $(this).val();
+	new PouchDB(dbname, function(err, result) {
+	  if (err) {
+	    console.error("appendDbList error : pouchdb fetch error - " + err);
+		alert('데이터베이스 연결에 실패하였습니다. 잠시 후 다시 이용해주세요');
+	  } else {
+		db = result;
+		if (db !== null) {
+		  fetchAllDocs();
+		}
+	  }
+	});
+  });
+
+  /****************************
+   * event : Table list 클릭시
+   ****************************/
+  $("#docsTable").selectable({
+	filter:'tbody tr',
+	selected: function(event, ui){
+				$("table tr").removeAttr( 'style' );
+				var doc = $(".ui-selected" ).attr("id");
+				ViewinDetail(doc);
+				focusMarker($(".ui-selected").index());
+			  }
+  });
+
+  /****************************
+   * event : Table 갯수 변경 클릭시
+   ****************************/
+  $("#listSize").change(function() {
+	$("#docsTable > tbody > tr").remove();
+	pagingCount = this.value;
+	fillTable(0);
+	setPaging();
+	$("#"+docslist[0].id).css("background","lightBlue");
+  });
+
+  /****************************
+   * event : 내보내기 클릭시
+   ****************************/
+  $("#btnExport").click(function () {
+	var csv = "";
+	$("#docsTable > tbody").find("tr").each(function() {
+	  var sep = "";
+	  $(this).find("td").each(function() {
+		csv += sep + $(this).text();
+		sep = ",";
+	  });
+	  csv += "\n"
+	});
+
+	$("#csv").text(csv);
+	window.URL = window.URL || window.webkitURL;
+	var blob = new Blob([csv]);
+	var blobURL = window.URL.createObjectURL(blob);
+
+	$("#download_link").attr("href", blobURL).attr("download", "data.csv");
+
+	var down = $("#export_file");
+	down.trigger('click');
+  });
+
+  /****************************
+   * event : animate 클릭시
+   ****************************/
+  var animate;
+  $("#btnAnimate").click(function () {
+	var count = -1;
+	var list = $("#docsTable tbody tr");
+	var listLen = list.length;
+
+	animate = setInterval(function() {
+	  count++;
+	  if ( count === list.length ) {
+	    clearInterval(animate);
+	  } else {
+		list.removeClass("ui-selected");
+		list.removeAttr( 'style' );
+		$(list[count]).addClass("ui-selected");
+		$(list[count]).css("background", "lightBlue");
+
+		ViewinDetail($(".ui-selected" ).attr("id"));
+		focusMarker($(".ui-selected").index());
+	  }
+	}, 400);
+  });
+  /****************************
+   * event : animate stop 클릭시
+   ****************************/
+  $("#stopAnimate").click(function() {
+    if (animate !== null) {
+	  clearInterval(animate);
+	}
+  });
+
+  /****************************
+   * event : search 버튼클릭시
+   ****************************/
+  $( "#search-db" ).click(function() {
+    if (docsTotal === 0) {
+	  alert('검색 대상이 없습니다');
+	  return false;
+	}
+
+	var checkbox = $("input:checkbox");
+	var isChecked = false;
+	for (var i = 0, len = checkbox.length ; i < len ; i++) {
+	  isChecked |= checkbox[i].checked;
+	}
+
+	if (!isChecked) {
+	  alert('검색하려는 조건 앞에 체크를 하세요.');
+	  checkbox[0].focus();
+	  return false;
+	}
+
+	// 일자선택 검색
+	var dayToStrArr = "";
+	var dayChecked = false;
+	if (checkbox[0].checked) {
+	  dayChecked = true;
+	  var fromDate = $("#from").val().trim();
+	  var toDate = $("#to").val().trim();
+
+	  if (fromDate ==="" || toDate === "") {
+		alert('일자를 입력하세요.');
+		$("#from").focus();
+		checkbox[0].checked = false;
+		return false;
+	  }
+
+	  var rangeDate = getDateList(fromDate, toDate);
+	  var uniqRange = [];
+	  for (var i = 0, len = uniqDays.length ; i < len ; i++) {
+		var date = uniqDays[i];
+		for (var j = 0, jlen = rangeDate.length ; j < jlen ; j++) {
+		  if (date === rangeDate[j]) {
+			uniqRange.push(date);
+			break;
+		  } 
+		}
+	  }
+
+	  var msgDialog = $("#msgDialog");
+	  var msgBox = msgDialog.find("p");
+	  msgBox.html("");
+
+	  dayToStrArr = JSON.stringify(uniqRange);
+	  dayToStrArr = dayToStrArr.substring(1, dayToStrArr.length -1);
+
+	  if (dayToStrArr.length == 0) {
+		msgBox.html("검색결과가 없습니다.");
+		msgDialog.dialog( "open" );
+		return false;
+	  }
+	}
+
+	// 기기명 선택 검색
+	var searchDevice = "";
+	var devChecked = false;
+	if (checkbox[1].checked) {
+	  devChecked = true;
+	  searchDevice = $("#deviceList").val();
+	  if (searchDevice === 'clear') {
+		alert('검색 기기를 선택하여주세요.');
+		$("#deviceList").focus();
+		return false;
+	  }
+	}
+
+	// build map function - example
+	/*
+    var mapFunc =
+       function(doc) {
+         var dateStr = doc._id.substring(0,8);
+         var arr = ["+ dayToStrArr + "];
+         if (arr.indexOf(dateStr) > -1) { 
+		   if (doc.device === '" + searchDevice + "') {
+             emit(doc._id, [ doc.GPS.Latitude, doc.GPS.Longitude, doc.Luminance.MeanY, doc.device]);
+         } } }
+	*/
+
+	var mapFunc =
+		" function(doc) { " ;
+
+	if (dayChecked) {
+	  mapFunc = mapFunc
+		+ "var dateStr = doc._id.substring(0,8);" 
+		+ "var arr = ["+ dayToStrArr + "];" 
+		+ "if (arr.indexOf(dateStr) > -1) { " ;
+	} 
+	if (devChecked) {
+	  mapFunc = mapFunc
+		+ "  if (doc.device === '" + searchDevice + "') { " ;
+	}
+	//mapFunc += "emit(doc._id, [ doc.GPS.Latitude, doc.GPS.Longitude, doc.Luminance.MeanY, doc.device]);" 
+	mapFunc += "emit(doc._id);" 
+	if (dayChecked) {
+	  mapFunc = mapFunc
+		+ " } ";
+	} 
+	if (devChecked) {
+	  mapFunc = mapFunc
+		+ " } ";
+	}
+	mapFunc = mapFunc
+	  + " } ";
+
+	$("#msgDialog").find("p").html("잠시기다려주세요. 검색중입니다....");
+	$("#msgDialog").dialog("open");
+	$(".ui-dialog-titlebar-close").hide();
+	$(".ui-dialog-buttonset").hide();
+
+	if(mapFunc != null) {
+	  db.query({map: mapFunc}, {include_docs: true}, function(err, result) {
+		if (err) {
+		  console.err("ERR : 조건검색 조회에 실패하였습니다 : " + err);
+		  alert("ERR : 조건검색 조회에 실패하였습니다 : " + err);
+		  $(".ui-dialog-titlebar-close").show();
+		  $(".ui-dialog-buttonset").show();
+		} else {
+		  docslist = result.rows;
+		  docsTotal = result.total_rows;
+
+		  $("#msgDialog").find("p").html("총 " + docsTotal + "건의 결과가 화면에 반영되었습니다.")
+		  $("#msgDialog").dialog("open");
+		  $('#docsTable > tbody > tr').remove();
+
+		  $(".ui-dialog-titlebar-close").show();
+		  $(".ui-dialog-buttonset").show();
+
+		  if (docsTotal != 0) {
+			fillTable(0);
+			setPaging();
+			$("#"+docslist[0].id).css("background","lightBlue");
+		  } else {
+			if (map != null) {
+			  map.setView([38,127],0);
+			  if (polyline != null) {
+				polyline.clearAddon();
+				map.removeLayer(polyline);
+				$( "#jsonInfo" ).jstree('destroy');
+				$("#paging").remove();
+				$("#RGBImg").attr("src","");
+				$("#YUVImg").attr("src","");
+				$("#TRACKINGImg").attr("src","");
+			  }
+			}
+		  }
+		}
+	  });
+	}
+  });
+
+
+  /*****************************************
+   * event : 검색옵션 중 device 옵션 클릭시
+   *****************************************/
+  $("#deviceList").click(function() {
+
+	var deviceName = $(this).val();
+	//var inputBox = $(this).parent().find('#devName');
+	var checkBox = $(this).parent().find('input:checkbox');
+	if (deviceName === 'clear') {
+	  //inputBox.val("");
+	  checkBox.attr("checked", false);
+	} else {
+	  //inputBox.val(deviceName);
+	  checkBox.attr("checked", true);
+	}
+  });
+
+  /*****************************************
+   * event : 이미지탭 다운로드 클릭스
+   *****************************************/
+  $("#imgDownload").click(function() {
+    var currentImg= $("div[aria-expanded|='true']").find("img");
+	var imgName = currentImg.attr("name");
+	var blobURL = currentImg.attr("src");
+
+	$("#download_link").attr("href", blobURL).attr("download", imgName);
+	var down = $("#export_file");
+	down.trigger('click');
+  });
+
+  /*****************************************
+   * event : JSON 데이터 다운로드
+   *****************************************/
+  $("#jsonDownload").click(function() {
+	if (currentDoc !== null) {
+	  var json = JSON.stringify(currentDoc);
+	  window.URL = window.URL || window.webkitURL;
+	  var blob = new Blob([json],{type: "application/json"});
+	  var blobURL = window.URL.createObjectURL(blob);
+
+	  $("#download_link").attr("href", blobURL).attr("download", currentDocId + ".json");
+	  var down = $("#export_file");
+	  down.trigger('click');
+	}
+  });
+
+});

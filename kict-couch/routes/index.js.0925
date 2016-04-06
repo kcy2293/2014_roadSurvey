@@ -1,0 +1,83 @@
+
+var fs = require('fs');
+module.db = null;
+
+exports.index = function(req, res){
+  res.render('index', { title: 'Express' })
+};
+
+exports.init = function(couchdb, res) {
+  module.db = couchdb;
+};
+
+
+exports.insert = function() {
+  
+  var metaDir = './resource/META/';
+  var camDir  = './resource/RGB/';
+  var LumiDir = './resource/YUV/';
+  var TrackDir= './resource/TRACKING/';
+
+  fs.readdir(metaDir, function(err, files) {
+    if (err) {
+	  // routes err pages.. 
+	  console.log(err);
+	}
+	for (var i = 0 , len = files.length ; i < len ; i++) {
+	//for (var i = 0 , len = 1 ; i < len ; i++) {
+	  fs.readFile(metaDir+files[i], function(err, data) {
+	    if (err) {
+		  console.log(err);
+		}
+		var jsObj = JSON.parse(data);
+		var key = jsObj.Camera.SysTime;
+
+		//console.log(jsObj.Camera.File);
+
+		var temp = (jsObj.Camera.File).split("/");
+		var camImg = temp[temp.length-1];
+		var camImgData = getImgData(camDir+camImg);
+
+		temp = (jsObj.Luminance.YUV).split("/");
+		var LumiImg = temp[temp.length-1];
+		var LumiImgData = getImgData(LumiDir+LumiImg);
+
+		temp = (jsObj.Tracking.File).split("/");
+		var TrackImg = temp[temp.length-1];
+		var TrackImgData = getImgData(TrackDir+TrackImg);
+
+		var attachImg = [
+		 { name: camImg,   data: camImgData,  content_type: 'image/jpg' },
+		 { name: LumiImg,  data: LumiImgData, content_type: 'image/jpg' },
+		 { name: TrackImg, data: TrackImgData,content_type: 'image/jpg' } 
+		];
+
+		module.db.multipart.insert(jsObj, attachImg, key, function(err, body) {
+		  if (err) {
+		    console.log(err);
+		  }
+		  console.log(body);
+		});
+
+		//console.log(jsObj.Camera.SysTime);
+		//console.log(jsObj[0]);
+
+		// Insert Meta data
+		/*
+		module.db.insert(jsObj, key, function(err, body, header) {
+		  if (err) {
+			console.log(key + ' insert err');
+			return;
+		  }
+		  console.log(body);
+		});
+		*/
+	  });
+	}
+  });
+};
+
+function getImgData(path) {
+  return fs.readFileSync(path);
+};
+

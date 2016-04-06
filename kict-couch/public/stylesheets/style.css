@@ -1,0 +1,22 @@
+body {
+  margin: 0px;
+}
+
+iframe {
+  margin: 0px;
+  padding: 0px;
+  width: 100%;
+  height: 300px;
+}
+
+#header {
+  text-align: center;
+  background: #333;
+  color: #999;
+  padding: 1px;
+}
+
+#section {
+  padding: 30px;
+}
+

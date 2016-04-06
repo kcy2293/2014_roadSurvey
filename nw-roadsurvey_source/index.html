@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>KICT-건설기술연구원 야간도로조사자료관리 프로그램</title>
+	<link rel="stylesheet" type="text/css" href="css/jquery-ui-1.10.3.css" />
+	<style>
+	body {
+		margin:0px;
+	}
+	.sep {
+		border-bottom: solid 1px #000000;
+		margin-bottom:10px;
+	}
+	.wrapper {
+		margin:20px; height:250px;
+		text-align:center;
+	}
+	.btn {
+		text-align:center;
+	}
+
+	.ui-button {
+		width: 150px;
+	}
+	</style>
+	<script type="text/javascript" src="js/jquery-latest.js"></script>
+	<script type="text/javascript" src="js/jquery-ui-latest.js"></script>
+	<script type="text/javascript">
+	  $(function() {
+		var Promise = require('es6-promise').Promise;
+		var gui = require('nw.gui');
+		var win = gui.Window.get();
+
+		$("#start")
+		  .button()
+		  .click(function() {
+		    gui.Window.open('vworld.html', {toolbar: false});
+			win.close();
+		  });
+	  });
+	</script>
+  </head>
+  <body>
+	<img src="images/logo.gif" width="221" height="57" alt="KICT 한국건설기술연구원" style="margin:10px">
+	<div class='sep'></div>
+	<div class='wrapper'>
+	  <img src="images/Intro.png" width="750" height="330">
+	</div>
+	<div class='btn'>
+	  <button id='start'>확 인</button>
+	</div>
+  </body>
+</html>

@@ -1,0 +1,257 @@
+
+/**************************************
+ * global variables
+ **************************************/
+var fs = require('fs');
+var dir = require('node-dir');
+var resourceDir = './resource/';
+module.nano = null;
+module.db = null;
+
+/**************************************
+ * binding couchdb driver
+ **************************************/
+exports.init = function(couchdb, res) {
+  module.nano = couchdb;
+};
+
+/**************************************
+ * init page render
+ * desc : get db list
+          and then render page
+ **************************************/
+exports.index = function(req, res){
+	getDBList(function(data) {
+	  var userDB = data;
+	  var resourceDir = fs.readdirSync('./resource');
+	  var msg = [];
+
+	  res.render('index', { 
+		  title: 'KICT - Data insert to CouchDB',
+		  dbList: userDB,
+		  dirList: resourceDir,
+		  result: msg
+	  });
+
+	});
+};
+
+/**************************************
+ * global function : getDBList
+ * desc : get db list 
+ **************************************/
+function getDBList(callback) {
+  module.nano.db.list(function(err, body) {
+    var userDB = [];
+	for (var i = 0, len = body.length ; i < len ; i++ ){
+	  if (body[i] == '_replicator')
+	    continue;
+	  if (body[i] == '_users')
+	    continue;
+	  if (body[i] == 'history')
+	    continue;
+	  userDB.push(body[i]);
+	}
+	callback(userDB);
+  });
+}
+
+
+/***************************************************
+ * post action : dbInsert & render
+ * desc : 1. parsingDir
+ * 		  2. and then loop each dir
+ *           2-1. parsingSubDir
+ *           2-2. and then loop each subdir
+ *                2-2-1. insert files data to db
+ ***************************************************/
+exports.dbInsert = function(req, res) {
+
+  require('date-format-lite');
+  module.db = module.nano.use(req.body.dbName);
+  var dirName = resourceDir + req.body.dirName;
+
+  run(function (resultMsg) {
+    getDBList(function(data) {
+	  var dirList = fs.readdirSync(resourceDir);
+	  res.render('index', {
+		title: 'KICT - Data insert to CouchDB',
+		dbList: data,
+		dirList: dirList,
+		result: resultMsg
+	  });
+	});
+  });
+
+  function run(callback) {
+	var msg = [];
+	parsingDir( dirName, function (err, dirList) {
+	  if (err) {
+		console.error(err);
+		msg.push(JSON.stringify(err));
+		callback(msg);
+	  } 
+
+	  if (dirList.length == 0) {
+		console.error('dirList.length == 0');
+		msg.push('META 디렉토리가 존재하지 않는 폴더입니다. 다시확인바랍니다.');
+		callback(msg);
+	  }
+
+	  console.log(dirList);
+
+	  /*
+	  dirList.forEach( function(dir) {
+
+		parsingSubDir( dir, function (err, fileList) {
+		  if (err) {
+			console.error(err);
+			msg.push(JSON.stringify(err));
+			callback(msg);
+		  }
+
+		  fileList.forEach( function (file) {
+
+			insertDB( file, function (err, resultMsg) {
+			  if (err) {
+				console.error(err);
+				msg.push(JSON.stringify(err));
+				callback(msg);
+			  }
+			});
+		  });
+		});
+	  });
+	  */
+	});
+  }
+
+  function parsingDir( dirName, callback ) {
+	var dirList = [];
+	dir.subdirs(dirName, function(err, subDirs) {
+	  if (err) {
+	    callback(err, null);
+	  }
+	  else {
+		for (var i = 0, len = subDirs.length ; i < len ; i++) {
+		  var pos = subDirs[i].indexOf('META');
+		  if (pos > 0) {
+			dirList.push(subDirs[i].substring(0, pos));
+		  }
+		}
+		callback(null, dirList);
+	  }
+	});
+  }
+
+  /*
+  var date = new Date();
+  var historyKey = date.format("YYYYMMDD_hhmmssms");
+  var historyVal = {"dbName":req.body.dbName,"resouce":dirName};
+  
+  var metaDir = './resource/'+dirName+'/META/';
+  var camDir  = './resource/'+dirName+'/RGB/';
+  var LumiDir = './resource/'+dirName+'/YUV/';
+  var TrackDir= './resource/'+dirName+'/TRACKING/';
+
+  run(function(resultMsg) {
+	getDBList(function(data) {
+	  var resourceDir = fs.readdirSync('./resource');
+
+	  setHistory(function() {
+		res.render('index', {
+		  title: 'KICT - Data insert to CouchDB',
+		  dbList: data,
+		  dirList: resourceDir,
+		  result: resultMsg
+		});
+	  });
+	});
+  });
+  */
+
+  /**************************************
+   * function : getImgData
+   * desc : get image file from path
+   **************************************/
+  function getImgData(path) {
+	return fs.readFileSync(path);
+  };
+
+  /**************************************
+   * function : getImgData
+   * desc : get image file from path
+   **************************************/
+  function run2(callback) {
+	fs.readdir(metaDir, function(err, files) {
+	  if (err) {
+	    var errMsg = [];
+		errMsg.push(JSON.stringify(err));
+		console.error(errMsg);
+		callback(errMsg);
+	  } else { 
+
+		var msg = [];
+
+		for (var i = 0 , len = files.length ; i < len ; i++) {
+		  function repeatRun(result) {
+			fs.readFile(metaDir+files[i], function(err, data) {
+			  if (err) {
+				console.log(err);
+				return;
+			  }
+
+			  var jsObj = JSON.parse(data);
+			  var key = jsObj.Camera.SysTime;
+			  var temp = (jsObj.Camera.File).split("/");
+			  var camImg = temp[temp.length-1];
+			  var camImgData = getImgData(camDir+camImg);
+			  temp = (jsObj.Luminance.YUV).split("/");
+			  var LumiImg = temp[temp.length-1];
+			  var LumiImgData = getImgData(LumiDir+LumiImg);
+			  temp = (jsObj.Tracking.File).split("/");
+			  var TrackImg = temp[temp.length-1];
+			  var TrackImgData = getImgData(TrackDir+TrackImg);
+
+			  var attachImg = [
+			   { name: camImg,   data: camImgData,  content_type: 'image/jpg' },
+			   { name: LumiImg,  data: LumiImgData, content_type: 'image/jpg' },
+			   { name: TrackImg, data: TrackImgData,content_type: 'image/jpg' } 
+			  ];
+			  module.db.multipart.insert(jsObj, attachImg, key, function(err, body) {
+				if (err) {
+				  result(err.name+','+key+','+err.reason);
+				} else {
+				  result(body.ok+','+body.id);
+				}
+			  });
+
+			});
+		  }
+		  repeatRun(function(data) {
+			msg.push(data);
+			if (msg.length == len) {
+			  callback(msg);
+			}
+		  });
+		}
+	  }
+	});
+  }
+
+  /**************************************
+   * function : getImgData
+   * desc : get image file from path
+   **************************************/
+  function setHistory(doAfter) {
+    var history = module.nano.use('history');
+	history.insert(historyVal, historyKey, function(err, body, header) {
+	  if (err) {
+		console.err(key + ' insert err');
+		return;
+	  }
+	  doAfter();
+	});
+  }
+}
+
